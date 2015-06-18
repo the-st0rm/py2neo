@@ -20,6 +20,7 @@ from py2neo.core import Graph, Node, NodePointer, Path, Relationship, Rev
 from py2neo.cypher.lang import cypher_escape
 from py2neo.cypher.util import StartOrMatch
 from py2neo.util import ustr, xstr
+import re
 
 
 __all__ = ["CreateStatement"]
@@ -47,6 +48,7 @@ class CreateStatement(object):
         self.start_or_match_clause = StartOrMatch(self.graph)
         self.create_clause = []
         self.create_unique_clause = []
+        self.merge_clause = []
         self.return_clause = []
         self.parameters = {}
 
@@ -67,6 +69,18 @@ class CreateStatement(object):
         """ The full Cypher statement as a string.
         """
         clauses = [self.start_or_match_clause.string]
+        if self.merge_clause:
+            temp_merge_clause = []
+            for cl in self.merge_clause:
+                #ISSUE In neo4j 
+                #py2neo.cypher.error.statement.InvalidSyntax: Parameter maps cannot be used in MERGE patterns (use a literal map instead, eg. "{id: {param}.id}")
+                #So I have to subsitute the params map
+
+               
+
+                temp_merge_clause.append("MERGE "+cl)
+            clauses.append("\n".join(temp_merge_clause))
+
         if self.create_clause:
             clauses.append("CREATE " + ",".join(self.create_clause))
         if self.create_unique_clause:
@@ -106,6 +120,24 @@ class CreateStatement(object):
                     metadata = dehydrated[rel_names[j]]
                     rel.bind(metadata["self"], metadata)
         return tuple(self.entities)
+
+    
+    def merge(self, entity, labels, properties, ON_Condition=None):
+        """
+            This function recieves entity (node) and lables of this node and properties that will use to MATCH this node 
+            and a raw ON_Condition. ON MATCH SET person.found = TRUE , person.lastAccessed = timestamp() AND/OR 
+                                    ON CREATE SET person.found = TRUE , person.lastAccessed = timestamp()
+
+        """
+        entity = Graph.cast(entity)
+        index = len(self.entities)
+        name = _(index)
+        if isinstance(entity, Node):
+            self.names.append(self._merge_node(entity, name, labels, properties, ON_Condition=ON_Condition))
+        else:
+            raise TypeError(" Cannot create entity ig type %s" % type(entity).__name__) 
+        self.entities.append(entity)
+
 
     def create(self, entity):
         """ Append an entity to the CREATE clause of this statement.
@@ -155,6 +187,40 @@ class CreateStatement(object):
                 self.parameters[name] = node.properties
         return "(" + template.format(**kwargs) + ")"
 
+    def _merge_parrtern(self, node, name, labels, properties, ON_Condition):
+        template = "{name}"
+        kwargs = {"name": name}
+        if labels: #and self.supports_node_labels:
+            template += "{labels}"
+            kwargs["labels"] = "".join(":" + cypher_escape(label) for label in labels)
+        if properties:
+            template += " {{{name}}}"
+            self.parameters[name] = properties
+        
+
+        
+        created_node = "(" + template.format(**kwargs) + ")"
+        
+        created_node = re.sub("'([a-zA-Z0-9_]+)':", '\g<1>:',created_node.format(**self.parameters))
+        created_node = re.sub("u'(.*?)'",'\'\g<1>\'', created_node)
+        created_node = re.sub("u\"(.*?)\"",'"\g<1>"', created_node)
+        #print created_node
+
+        if ON_Condition:
+            kwargs2={"name": name}
+            try:
+                temp = ON_Condition.format(**kwargs2)
+            except:
+                print "EXCEPTION !!! couldn't match condition with kwargs2"
+                print "ON Condition: ", ON_Condition
+                print "kwargs: ", kwargs2
+                raise
+            created_node+= " %s" %(temp)
+        
+        #print created_node
+        return created_node
+
+
     def _create_node(self, node, name):
         if node.bound:
             self.start_or_match_clause.node(name, "{" + name + "}")
@@ -163,6 +229,13 @@ class CreateStatement(object):
             self.create_clause.append(self._node_pattern(node, name, full=True))
         self.return_clause.append(name)
         return [name], []
+    def _merge_node(self, node, name, labels, properties, ON_Condition=None):
+        if not node.bound:
+            self.merge_clause.append(self._merge_parrtern(node, name, labels, properties, ON_Condition) )
+        self.return_clause.append(name)
+        return [name], []
+
+
 
     def _create_path_nodes(self, path, name, unique):
         node_names = []
