@@ -22,6 +22,17 @@ To install, run the following::
 
     $ pip install py2neo
 
+Additions:
+------------
+I have added merge function to class py2neo.cypher.CreateStatement so you can use it with the builder to completely build a graph. 
+That was a solution to [my question on stackoverflow.com](https://stackoverflow.com/questions/30843003/py2neo-constructing-graph-using-cypher-builders)
+
+You can call the new function as follows <br/>
+builder.merge(Node, array of labels, properties, [raw_on_conditional_query])<br/>
+The function will find the node that matches the given label and properties. If the node isn't found it will create it and it will execute the condition given e.g., on submit SET x=1 ON CREATE SET y=1<br/>
+Note that the optional raw_on_conditional_query is raw cypher query so you should make sure that data are escaped in it correctly. 
+
+
 
 For more information, read through the [full introduction](http://py2neo.org/2.0/intro.html).
 
